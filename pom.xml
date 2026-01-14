@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>dev.riloox</groupId>
+    <artifactId>Freecam</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <hytale.server.jar>C:/Users/fprun/Desktop/Hytale Dedicated/hytale-downloader/2026.01.13-50e69c385/Server/HytaleServer.jar</hytale.server.jar>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.hypixel.hytale</groupId>
+            <artifactId>HytaleServer</artifactId>
+            <version>2026.01.13-50e69c385</version>
+            <scope>system</scope>
+            <systemPath>${hytale.server.jar}</systemPath>
+        </dependency>
+    </dependencies>
+
+</project>

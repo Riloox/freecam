@@ -1,0 +1,20 @@
+{
+  "Group": "dev.riloox",
+  "Name": "Freecam",
+  "Version": "1.0.0",
+  "Description": "Adds a toggleable freecam with adjustable speed that preserves player state and blocks interaction.",
+  "Authors": [
+    {
+      "Name": "Riloox",
+      "Email": "fprunell10@gmail.com",
+      "Url": "https://riloox.site"
+    }
+  ],
+  "Website": "https://riloox.site",
+  "ServerVersion": "*",
+  "Dependencies": {},
+  "OptionalDependencies": {},
+  "DisabledByDefault": false,
+  "IncludesAssetPack": false,
+  "Main": "dev.riloox.Freecam"
+}
