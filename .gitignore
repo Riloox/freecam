@@ -41,3 +41,20 @@ build/
 ### Mac OS ###
 .DS_Store
 .ai
+
+### Common extras ###
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.orig
+.env
+.env.*
+!.env.example
+!.env.sample
+.env.local
+.direnv/
+.envrc
+Thumbs.db
+Desktop.ini

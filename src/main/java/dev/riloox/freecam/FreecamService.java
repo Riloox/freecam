@@ -151,7 +151,7 @@ public class FreecamService {
         settings.mouseInputTargetType = MouseInputTargetType.Any;
         settings.sendMouseMotion = true;
         settings.skipCharacterPhysics = true;
-        settings.isFirstPerson = true;
+        settings.isFirstPerson = false;
         settings.movementForceRotationType = com.hypixel.hytale.protocol.MovementForceRotationType.CameraRotation;
         settings.movementForceRotation = new Direction(0.0f, 0.0f, 0.0f);
         settings.attachedToType = AttachedToType.None;
