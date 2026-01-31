@@ -17,11 +17,13 @@ public class FreecamCommand extends AbstractPlayerCommand {
 
     private final FreecamService freecamService;
     private final OptionalArg<Integer> speedArg;
+    private final OptionalArg<String> modeArg;
 
     public FreecamCommand(String name, String description, FreecamService freecamService) {
         super(name, description);
         this.freecamService = freecamService;
         this.speedArg = withOptionalArg("speed", "Freecam speed (1-10)", new FreecamSpeedArgumentType());
+        this.modeArg = withOptionalArg("mode", "Optional mode (tripod/lock/unlock)", new FreecamModeArgumentType());
         addAliases("fc");
     }
 
@@ -34,12 +36,41 @@ public class FreecamCommand extends AbstractPlayerCommand {
         Integer speed = null;
         boolean hasSpeedArg = context.provided(speedArg);
         boolean wasActive = freecamService.isActive(playerRef.getUuid());
+        boolean wasTripodActive = freecamService.isTripodActive(playerRef.getUuid());
 
         String rawInput = context.getInputString();
         Integer parsedSpeed = parseSpeedInput(rawInput);
+        Boolean lockInput = parseLockInput(rawInput);
+        Boolean tripodInput = parseTripodInput(rawInput);
+        String modeInput = context.provided(modeArg) ? context.get(modeArg) : null;
         if (parsedSpeed != null) {
             speed = parsedSpeed;
             hasSpeedArg = true;
+        }
+        if (modeInput != null && !modeInput.isBlank()) {
+            Boolean modeTripod = parseTripodInput(modeInput);
+            Boolean modeLock = parseLockInput(modeInput);
+            if (modeTripod != null) {
+                tripodInput = modeTripod;
+            }
+            if (modeLock != null) {
+                lockInput = modeLock;
+            }
+        }
+
+        if (lockInput != null) {
+            boolean locked = freecamService.setLookLocked(playerRef, world, lockInput);
+            context.sendMessage(Message.raw(locked ? "Freecam look lock enabled." : "Freecam look lock disabled."));
+        }
+
+        if (Boolean.TRUE.equals(tripodInput)) {
+            if (!wasActive && !wasTripodActive) {
+                context.sendMessage(Message.raw("Tripod can only be enabled from freecam."));
+                return;
+            }
+            boolean enabled = freecamService.toggleTripod(playerRef, world, store, entityRef);
+            context.sendMessage(Message.raw(enabled ? "Tripod enabled." : "Tripod disabled."));
+            return;
         }
 
         if (hasSpeedArg) {
@@ -50,8 +81,7 @@ public class FreecamCommand extends AbstractPlayerCommand {
                 freecamService.setSpeed(playerRef, world, speed);
                 context.sendMessage(Message.raw("Freecam speed set to " + speed + "."));
             } else {
-                context.sendMessage(Message.raw("Speed must be a number between 1 and 10."));
-                return;
+                hasSpeedArg = false;
             }
         }
 
@@ -61,8 +91,13 @@ public class FreecamCommand extends AbstractPlayerCommand {
             enabled = freecamService.toggle(playerRef, world, store, entityRef);
             toggled = true;
         } else if (!hasSpeedArg) {
-            enabled = freecamService.toggle(playerRef, world, store, entityRef);
-            toggled = true;
+            if (lockInput == null) {
+                enabled = freecamService.toggle(playerRef, world, store, entityRef);
+                toggled = true;
+            } else if (!wasActive && Boolean.TRUE.equals(lockInput)) {
+                enabled = freecamService.toggle(playerRef, world, store, entityRef);
+                toggled = true;
+            }
         }
 
         if (toggled) {
@@ -97,6 +132,35 @@ public class FreecamCommand extends AbstractPlayerCommand {
             if (token.toLowerCase().startsWith("--speed=")) {
                 String value = token.substring("--speed=".length());
                 return parseSpeedValue(value);
+            }
+        }
+        return null;
+    }
+
+    private static Boolean parseLockInput(String input) {
+        if (input == null || input.isEmpty()) {
+            return null;
+        }
+        String[] tokens = input.trim().split("\\s+");
+        for (String token : tokens) {
+            if ("lock".equalsIgnoreCase(token) || "--lock".equalsIgnoreCase(token)) {
+                return true;
+            }
+            if ("unlock".equalsIgnoreCase(token) || "--unlock".equalsIgnoreCase(token)) {
+                return false;
+            }
+        }
+        return null;
+    }
+
+    private static Boolean parseTripodInput(String input) {
+        if (input == null || input.isEmpty()) {
+            return null;
+        }
+        String[] tokens = input.trim().split("\\s+");
+        for (String token : tokens) {
+            if ("tripod".equalsIgnoreCase(token) || "trip".equalsIgnoreCase(token) || "t".equalsIgnoreCase(token)) {
+                return true;
             }
         }
         return null;

@@ -20,7 +20,6 @@ public class FreecamSpeedArgumentType extends SingleArgumentType<Integer> {
             }
             return value;
         } catch (NumberFormatException ex) {
-            result.fail(Message.raw("Speed must be a number between 1 and 10."));
             return null;
         }
     }
