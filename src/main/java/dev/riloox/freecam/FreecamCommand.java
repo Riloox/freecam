@@ -23,7 +23,7 @@ public class FreecamCommand extends AbstractPlayerCommand {
         super(name, description);
         this.freecamService = freecamService;
         this.speedArg = withOptionalArg("speed", "Freecam speed (1-10)", new FreecamSpeedArgumentType());
-        this.modeArg = withOptionalArg("mode", "Optional mode (tripod/lock/unlock)", new FreecamModeArgumentType());
+        this.modeArg = withOptionalArg("mode", "Optional mode (lock/unlock; tripod disabled)", new FreecamModeArgumentType());
         addAliases("fc");
     }
 
@@ -36,7 +36,6 @@ public class FreecamCommand extends AbstractPlayerCommand {
         Integer speed = null;
         boolean hasSpeedArg = context.provided(speedArg);
         boolean wasActive = freecamService.isActive(playerRef.getUuid());
-        boolean wasTripodActive = freecamService.isTripodActive(playerRef.getUuid());
 
         String rawInput = context.getInputString();
         Integer parsedSpeed = parseSpeedInput(rawInput);
@@ -64,12 +63,7 @@ public class FreecamCommand extends AbstractPlayerCommand {
         }
 
         if (Boolean.TRUE.equals(tripodInput)) {
-            if (!wasActive && !wasTripodActive) {
-                context.sendMessage(Message.raw("Tripod can only be enabled from freecam."));
-                return;
-            }
-            boolean enabled = freecamService.toggleTripod(playerRef, world, store, entityRef);
-            context.sendMessage(Message.raw(enabled ? "Tripod enabled." : "Tripod disabled."));
+            context.sendMessage(Message.raw("Tripod is temporarily disabled while we fix stability issues."));
             return;
         }
 

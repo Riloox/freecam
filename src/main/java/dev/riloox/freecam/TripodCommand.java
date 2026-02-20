@@ -14,11 +14,8 @@ import javax.annotation.Nonnull;
 
 public class TripodCommand extends AbstractPlayerCommand {
 
-    private final FreecamService freecamService;
-
     public TripodCommand(String name, String description, FreecamService freecamService) {
         super(name, description);
-        this.freecamService = freecamService;
         addAliases("trip", "t");
     }
 
@@ -28,14 +25,7 @@ public class TripodCommand extends AbstractPlayerCommand {
                            @Nonnull Ref<EntityStore> entityRef,
                            @Nonnull PlayerRef playerRef,
                            @Nonnull World world) {
-        boolean wasActive = freecamService.isActive(playerRef.getUuid());
-        boolean wasTripodActive = freecamService.isTripodActive(playerRef.getUuid());
-        if (!wasActive && !wasTripodActive) {
-            context.sendMessage(Message.raw("Tripod can only be enabled from freecam."));
-            return;
-        }
-        boolean enabled = freecamService.toggleTripod(playerRef, world, store, entityRef);
-        context.sendMessage(Message.raw(enabled ? "Tripod enabled." : "Tripod disabled."));
+        context.sendMessage(Message.raw("Tripod is temporarily disabled while we fix stability issues."));
     }
 
     @Override

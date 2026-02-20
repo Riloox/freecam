@@ -4,7 +4,7 @@ Freecam adds a toggleable freecam camera for Hytale servers, letting players det
 
 ## Features
 - Toggleable freecam with `/freecam` or `/fc`.
-- Tripod camera mode with `/tripod` (fixed camera while you can still move normally).
+- Tripod camera mode is temporarily disabled in `1.0.2` while stability fixes are in progress.
 - Adjustable speed: `/freecam --speed 3` or `/fc --speed 3` (range 1-10).
 - Optional freecam look lock for stream scenes (prevents camera drift while tabbed out).
 - Restores player state and position when disabling freecam.
@@ -17,11 +17,12 @@ Freecam adds a toggleable freecam camera for Hytale servers, letting players det
 - `/freecam --speed <1-10>` or `/freecam --speed=<1-10>` - Set freecam speed.
 - `/freecam lock` - Enable freecam look lock (camera stays still while tabbed out).
 - `/freecam unlock` - Disable freecam look lock.
-- `/tripod` - Toggle tripod camera mode.
+- `/tripod` - Temporarily disabled in `1.0.2`.
 
 ## Notes
 - This mod is server-side and does not modify client files.
 - Freecam will auto-dismount you before enabling to avoid seat-related crashes.
+- Tripod commands currently return a temporary disabled message.
 - Use responsibly; this mod does not promote cheats, griefing tools, or disruptive behavior.
 
 ## Permissions

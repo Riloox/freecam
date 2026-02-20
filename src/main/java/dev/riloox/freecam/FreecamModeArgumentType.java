@@ -6,7 +6,7 @@ import com.hypixel.hytale.server.core.command.system.arguments.types.SingleArgum
 public class FreecamModeArgumentType extends SingleArgumentType<String> {
 
     public FreecamModeArgumentType() {
-        super("mode", "Optional mode (tripod/lock/unlock)");
+        super("mode", "Optional mode (lock/unlock; tripod disabled)");
     }
 
     @Override

@@ -58,3 +58,7 @@ build/
 .envrc
 Thumbs.db
 Desktop.ini
+HytaleServer.jar
+hytaleserver.jar
+pom.xml
+!pom.xml.example

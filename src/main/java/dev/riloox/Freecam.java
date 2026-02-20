@@ -26,7 +26,7 @@ public class Freecam extends JavaPlugin {
                 new FreecamCommand("freecam", "Toggle freecam mode", freecamService)
         );
         this.getCommandRegistry().registerCommand(
-                new TripodCommand("tripod", "Toggle tripod camera mode", freecamService)
+                new TripodCommand("tripod", "Tripod camera mode (temporarily disabled)", freecamService)
         );
         EntityStore.REGISTRY.registerSystem(new FreecamCameraTickSystem(freecamService));
         EntityStore.REGISTRY.registerSystem(new FreecamBreakBlockEventSystem(freecamService));
