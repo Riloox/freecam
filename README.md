@@ -33,4 +33,4 @@ Freecam adds a toggleable freecam camera for Hytale servers, letting players det
 If you encounter issues, include your server build version and logs when reporting bugs.
 
 ### Credits
-Created by Riloox. Website: https://riloox.site
+Created by Riloox. Website: https://riloox.github.io
