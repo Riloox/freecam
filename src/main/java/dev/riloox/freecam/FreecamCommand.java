@@ -23,7 +23,7 @@ public class FreecamCommand extends AbstractPlayerCommand {
         super(name, description);
         this.freecamService = freecamService;
         this.speedArg = withOptionalArg("speed", "Freecam speed (1-10)", new FreecamSpeedArgumentType());
-        this.modeArg = withOptionalArg("mode", "Optional mode (lock/unlock; tripod disabled)", new FreecamModeArgumentType());
+        this.modeArg = withOptionalArg("mode", "Optional mode (lock/unlock)", new FreecamModeArgumentType());
         addAliases("fc");
     }
 
@@ -40,18 +40,13 @@ public class FreecamCommand extends AbstractPlayerCommand {
         String rawInput = context.getInputString();
         Integer parsedSpeed = parseSpeedInput(rawInput);
         Boolean lockInput = parseLockInput(rawInput);
-        Boolean tripodInput = parseTripodInput(rawInput);
         String modeInput = context.provided(modeArg) ? context.get(modeArg) : null;
         if (parsedSpeed != null) {
             speed = parsedSpeed;
             hasSpeedArg = true;
         }
         if (modeInput != null && !modeInput.isBlank()) {
-            Boolean modeTripod = parseTripodInput(modeInput);
             Boolean modeLock = parseLockInput(modeInput);
-            if (modeTripod != null) {
-                tripodInput = modeTripod;
-            }
             if (modeLock != null) {
                 lockInput = modeLock;
             }
@@ -60,11 +55,6 @@ public class FreecamCommand extends AbstractPlayerCommand {
         if (lockInput != null) {
             boolean locked = freecamService.setLookLocked(playerRef, world, lockInput);
             context.sendMessage(Message.raw(locked ? "Freecam look lock enabled." : "Freecam look lock disabled."));
-        }
-
-        if (Boolean.TRUE.equals(tripodInput)) {
-            context.sendMessage(Message.raw("Tripod is temporarily disabled while we fix stability issues."));
-            return;
         }
 
         if (hasSpeedArg) {
@@ -142,19 +132,6 @@ public class FreecamCommand extends AbstractPlayerCommand {
             }
             if ("unlock".equalsIgnoreCase(token) || "--unlock".equalsIgnoreCase(token)) {
                 return false;
-            }
-        }
-        return null;
-    }
-
-    private static Boolean parseTripodInput(String input) {
-        if (input == null || input.isEmpty()) {
-            return null;
-        }
-        String[] tokens = input.trim().split("\\s+");
-        for (String token : tokens) {
-            if ("tripod".equalsIgnoreCase(token) || "trip".equalsIgnoreCase(token) || "t".equalsIgnoreCase(token)) {
-                return true;
             }
         }
         return null;

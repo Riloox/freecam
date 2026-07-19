@@ -1,8 +1,10 @@
 package dev.riloox.freecam;
 
 import com.hypixel.hytale.math.vector.Transform;
-import com.hypixel.hytale.math.vector.Vector3f;
-import com.hypixel.hytale.math.vector.Vector3d;
+import com.hypixel.hytale.math.vector.Rotation3f;
+import org.joml.Vector3d;
+import org.joml.Vector3f;
+import org.joml.Vector2f;
 import com.hypixel.hytale.protocol.ApplyLookType;
 import com.hypixel.hytale.protocol.ApplyMovementType;
 import com.hypixel.hytale.protocol.AttachedToType;
@@ -16,10 +18,14 @@ import com.hypixel.hytale.protocol.Position;
 import com.hypixel.hytale.protocol.PositionType;
 import com.hypixel.hytale.protocol.RotationType;
 import com.hypixel.hytale.protocol.ServerCameraSettings;
-import com.hypixel.hytale.protocol.Vector2f;
+import com.hypixel.hytale.protocol.SavedMovementStates;
 import com.hypixel.hytale.protocol.packets.camera.SetServerCamera;
 import com.hypixel.hytale.protocol.packets.camera.SetFlyCameraMode;
+import com.hypixel.hytale.protocol.packets.player.SetMovementStates;
 import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.inventory.Inventory;
+import com.hypixel.hytale.server.core.inventory.ItemStack;
+import com.hypixel.hytale.server.core.inventory.container.ItemContainer;
 import com.hypixel.hytale.server.core.modules.entity.player.PlayerInput;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
@@ -28,6 +34,9 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.builtin.mounts.MountedByComponent;
 import com.hypixel.hytale.builtin.mounts.MountedComponent;
+import com.hypixel.hytale.server.core.entity.movement.MovementStatesComponent;
+import com.hypixel.hytale.server.core.modules.physics.component.Velocity;
+import com.hypixel.hytale.protocol.MovementStates;
 
 import java.util.List;
 import java.util.Map;
@@ -44,7 +53,6 @@ public class FreecamService {
     private final Map<UUID, Boolean> lookLocked = new ConcurrentHashMap<>();
     private static final int DEFAULT_SPEED = 5;
     private static final float DEFAULT_EYE_HEIGHT = 1.62f;
-    private static final float TRIPOD_STICK_DISTANCE = 0.01f;
 
     public boolean toggle(PlayerRef playerRef,
                           World world,
@@ -83,9 +91,9 @@ public class FreecamService {
         speeds.put(playerRef.getUuid(), clamped);
         if (isActive(playerRef.getUuid())) {
             Transform transform = safeTransform(playerRef);
-            com.hypixel.hytale.math.vector.Vector3f head = safeHeadRotation(playerRef);
+            Rotation3f head = safeHeadRotation(playerRef);
             playerRef.getPacketHandler().writeNoCache(
-                    new SetServerCamera(ClientCameraView.Custom, true, buildFreecamSettings(transform, head, clamped, isLookLocked(playerRef.getUuid())))
+                    new SetServerCamera(ClientCameraView.Custom, false, buildFreecamSettings(transform, head, clamped, isLookLocked(playerRef.getUuid())))
             );
         }
     }
@@ -94,9 +102,9 @@ public class FreecamService {
         lookLocked.put(playerRef.getUuid(), locked);
         if (isActive(playerRef.getUuid())) {
             Transform transform = safeTransform(playerRef);
-            com.hypixel.hytale.math.vector.Vector3f head = safeHeadRotation(playerRef);
+            Rotation3f head = safeHeadRotation(playerRef);
             playerRef.getPacketHandler().writeNoCache(
-                    new SetServerCamera(ClientCameraView.Custom, true, buildFreecamSettings(transform, head, getSpeed(playerRef.getUuid()), locked))
+                    new SetServerCamera(ClientCameraView.Custom, false, buildFreecamSettings(transform, head, getSpeed(playerRef.getUuid()), locked))
             );
         }
         return locked;
@@ -111,31 +119,40 @@ public class FreecamService {
             disableTripod(playerId, playerRef);
             return false;
         }
-        FreecamState activeState = active.get(playerId);
-        if (activeState == null) {
-            LOGGER.info("Tripod requested but freecam state missing for player " + playerId);
-            return false;
+        // Tripod is a standalone camera mode. If freecam happens to be active, leave it cleanly
+        // first and plant the tripod at the player's restored body viewpoint.
+        if (active.containsKey(playerId)) {
+            disable(playerId, playerRef, world, store, entityRef);
         }
-        Transform cameraTransform = activeState.transform != null ? activeState.transform.clone() : safeTransform(playerRef);
-        Vector3f cameraHeadRotation = activeState.headRotation != null ? activeState.headRotation.clone() : safeHeadRotation(playerRef);
+        Transform cameraTransform = safeTransform(playerRef);
+        Rotation3f cameraHeadRotation = safeHeadRotation(playerRef);
         Vector3d position = cameraTransform.getPosition();
         LOGGER.info("Tripod snapshot for " + playerId
                 + " pos=(" + position.x + "," + position.y + "," + position.z + ")"
-                + " yaw=" + cameraHeadRotation.getYaw()
-                + " pitch=" + cameraHeadRotation.getPitch()
-                + " roll=" + cameraHeadRotation.getRoll());
-        if (active.containsKey(playerId)) {
-            disable(playerId, playerRef, world, store, entityRef, false);
-        }
+                + " yaw=" + cameraHeadRotation.yaw()
+                + " pitch=" + cameraHeadRotation.pitch()
+                + " roll=" + cameraHeadRotation.roll());
         enableTripod(playerId, playerRef, cameraTransform, cameraHeadRotation);
         return true;
     }
 
-    public void tick(PlayerRef playerRef, World world, PlayerInput input, float deltaSeconds) {
+    public void tick(PlayerRef playerRef, World world, Store<EntityStore> store, PlayerInput input, float deltaSeconds) {
         UUID playerId = playerRef.getUuid();
         FreecamState state = active.get(playerId);
         if (state == null) {
             return;
+        }
+        // Creative flight is required for vertical fly-camera input in the current client. Force
+        // the state every tick because a Space gesture can toggle it client-side without first
+        // changing the server component. Keep the body anchored as a second line of defense.
+        if (store != null && world != null) {
+            forceFlyingInput(input);
+            setFlying(store, playerRef.getReference(), true);
+            playerRef.getPacketHandler().writeNoCache(
+                    new SetMovementStates(new SavedMovementStates(true))
+            );
+            playerRef.updatePosition(world, state.bodyTransform, state.bodyHeadRotation);
+            restoreInventory(store, playerRef.getReference(), state.inventorySnapshot);
         }
         InputSnapshot snapshot = readInputSnapshot(state.transform, state.headRotation, input, state.lastInputIndex);
         if (snapshot == null || !snapshot.changed()) {
@@ -147,13 +164,13 @@ public class FreecamService {
                     + " hasWishMovement=" + snapshot.hasWishMovement()
                     + " wish=(" + snapshot.wishX() + "," + snapshot.wishY() + "," + snapshot.wishZ() + ")"
                     + " setHeadUpdates=" + snapshot.setHeadUpdates()
-                    + " yaw=" + snapshot.headRotation().getYaw()
-                    + " pitch=" + snapshot.headRotation().getPitch()
-                    + " roll=" + snapshot.headRotation().getRoll());
+                    + " yaw=" + snapshot.headRotation().yaw()
+                    + " pitch=" + snapshot.headRotation().pitch()
+                    + " roll=" + snapshot.headRotation().roll());
             state.loggedInputSummary = true;
         }
         Transform nextTransform = snapshot.transform();
-        Vector3f nextHeadRotation = snapshot.headRotation();
+        Rotation3f nextHeadRotation = snapshot.headRotation();
         if (snapshot.hasWishMovement()) {
             Vector3d position = nextTransform.getPosition();
             double x = position != null ? position.x : 0.0;
@@ -162,7 +179,7 @@ public class FreecamService {
             double localX = snapshot.wishX();
             double localY = snapshot.wishY();
             double localZ = snapshot.wishZ();
-            double yaw = nextHeadRotation.getYaw();
+            double yaw = nextHeadRotation.yaw();
             double cos = Math.cos(yaw);
             double sin = Math.sin(yaw);
             double worldX = (localX * cos) - (localZ * sin);
@@ -175,71 +192,21 @@ public class FreecamService {
                     z + (worldZ * horizontal * deltaSeconds)
             );
         }
+        // Track the camera position/rotation from the client's reported input so tripod can plant an
+        // accurate snapshot, but DO NOT re-send the camera every tick: the Custom camera is driven
+        // client-side via movementMultiplier/lookMultiplier, and re-sending a server-computed
+        // position each tick fought that and pinned/sank the camera ("can't fly"). The camera is
+        // (re)sent only on enable and on speed/lock changes.
         state.transform = nextTransform;
         state.headRotation = nextHeadRotation;
         state.lastInputIndex = snapshot.nextIndex();
-        playerRef.getPacketHandler().writeNoCache(
-                new SetServerCamera(ClientCameraView.Custom, true,
-                        buildFreecamSettings(state.transform, state.headRotation, getSpeed(playerId), isLookLocked(playerId)))
-        );
     }
 
     public void tickTripod(PlayerRef playerRef, World world, PlayerInput input) {
-        TripodState state = tripodActive.get(playerRef.getUuid());
-        if (state == null) {
-            return;
-        }
-        if (world != null && state.transform != null) {
-            Transform current = safeTransform(playerRef);
-            if (!isClose(current, state.transform)) {
-                playerRef.updatePosition(world, state.transform, safeHeadRotation(playerRef));
-            }
-        }
-        int setHeadUpdates = 0;
-        int setBodyUpdates = 0;
-        Vector3f playerHeadRotation = state.playerHeadRotation != null
-                ? state.playerHeadRotation.clone()
-                : safeHeadRotation(playerRef);
-        if (input != null) {
-            List<PlayerInput.InputUpdate> updates = input.getMovementUpdateQueue();
-            if (updates != null && !updates.isEmpty()) {
-                int size = updates.size();
-                int startIndex = Math.max(0, Math.min(state.lastInputIndex, size));
-                for (int i = startIndex; i < size; i++) {
-                    PlayerInput.InputUpdate update = updates.get(i);
-                    if (update instanceof PlayerInput.SetHead headUpdate) {
-                        com.hypixel.hytale.protocol.Direction direction = headUpdate.direction();
-                        playerHeadRotation = new Vector3f(direction.pitch, direction.yaw, direction.roll);
-                        setHeadUpdates++;
-                        continue;
-                    }
-                    if (update instanceof PlayerInput.SetBody bodyUpdate) {
-                        com.hypixel.hytale.protocol.Direction direction = bodyUpdate.direction();
-                        playerHeadRotation = new Vector3f(direction.pitch, direction.yaw, direction.roll);
-                        setBodyUpdates++;
-                    }
-                }
-                state.lastInputIndex = size;
-            }
-        }
-        if ((setHeadUpdates > 0 || setBodyUpdates > 0) && world != null) {
-            state.playerHeadRotation = playerHeadRotation.clone();
-            playerRef.updatePosition(world, safeTransform(playerRef), playerHeadRotation);
-        }
-        Vector3f currentHead = state.headRotation != null
-                ? state.headRotation.clone()
-                : safeHeadRotation(playerRef);
-        long nowMs = System.currentTimeMillis();
-        if (nowMs - state.lastDebugAtMs >= 1000L) {
-            LOGGER.info("Tripod tick for " + playerRef.getUuid()
-                    + " cur=(" + currentHead.getYaw() + "," + currentHead.getPitch() + "," + currentHead.getRoll() + ")"
-                    + " setHeadUpdates=" + setHeadUpdates
-                    + " setBodyUpdates=" + setBodyUpdates
-                    + " playerHead=(" + playerHeadRotation.getYaw() + "," + playerHeadRotation.getPitch() + "," + playerHeadRotation.getRoll() + ")"
-                    + " hasTransform=" + (state.transform != null)
-                    + " hasHead=" + (state.headRotation != null));
-            state.lastDebugAtMs = nowMs;
-        }
+        // Tripod is a "planted camera": the client holds the static Custom camera we installed in
+        // enableTripod, while the player body is under normal server control. Nothing to do per
+        // tick — we intentionally no longer pin the player's position or force its rotation, which
+        // previously fought normal movement and caused the instability that disabled tripod.
     }
 
     private void enable(UUID playerId,
@@ -251,18 +218,25 @@ public class FreecamService {
         FreecamState state = new FreecamState();
         state.transform = safeTransform(playerRef);
         state.headRotation = safeHeadRotation(playerRef);
+        state.bodyTransform = state.transform.clone();
+        state.bodyHeadRotation = state.headRotation.clone();
         state.lastInputIndex = 0;
         state.hasServerCameraUpdates = false;
         state.previousGameMode = readGameMode(store, entityRef);
         state.executeBlockDamage = readExecuteBlockDamage(store, entityRef);
+        state.inventorySnapshot = snapshotInventory(store, entityRef);
+        captureMotion(store, entityRef, state);
         active.put(playerId, state);
 
         playerRef.getPacketHandler().writeNoCache(new SetFlyCameraMode(true));
-        setGameMode(store, entityRef, GameMode.Adventure);
+        // Creative supplies the client-side Space/Ctrl vertical controls required by fly-camera.
+        // Inventory is snapshotted above and continuously restored while this temporary mode is on.
+        setGameMode(store, entityRef, GameMode.Creative);
+        setFlying(store, entityRef, true);
         setExecuteBlockDamage(store, entityRef, false);
-        playerRef.updatePosition(world, state.transform, state.headRotation);
+        playerRef.updatePosition(world, state.bodyTransform, state.bodyHeadRotation);
         playerRef.getPacketHandler().writeNoCache(
-                new SetServerCamera(ClientCameraView.Custom, true, buildFreecamSettings(state.transform, state.headRotation, getSpeed(playerId), isLookLocked(playerId)))
+                new SetServerCamera(ClientCameraView.Custom, false, buildFreecamSettings(state.transform, state.headRotation, getSpeed(playerId), isLookLocked(playerId)))
         );
     }
 
@@ -288,11 +262,15 @@ public class FreecamService {
         playerRef.getPacketHandler().writeNoCache(new SetServerCamera(ClientCameraView.Custom, false, null));
         playerRef.getPacketHandler().writeNoCache(new SetFlyCameraMode(false));
         if (restorePosition) {
-            playerRef.updatePosition(world, state.transform, state.headRotation);
+            playerRef.updatePosition(world, state.bodyTransform, state.bodyHeadRotation);
         }
-        if (state.previousGameMode != null) {
-            setGameMode(store, entityRef, state.previousGameMode);
-        }
+        // Restore once more before leaving Creative so an inventory packet received between ticks
+        // cannot survive freecam shutdown.
+        restoreInventory(store, entityRef, state.inventorySnapshot);
+        restoreMotion(store, entityRef, state);
+        // Fall back to Adventure so a missed capture never strands the player in Creative.
+        setGameMode(store, entityRef, state.previousGameMode != null ? state.previousGameMode : GameMode.Adventure);
+        restoreMotion(store, entityRef, state);
         if (state.executeBlockDamage != null) {
             setExecuteBlockDamage(store, entityRef, state.executeBlockDamage);
         }
@@ -301,21 +279,22 @@ public class FreecamService {
     private void enableTripod(UUID playerId,
                               PlayerRef playerRef,
                               Transform transform,
-                              Vector3f headRotation) {
+                              Rotation3f headRotation) {
         TripodState state = new TripodState();
         state.transform = transform.clone();
         state.headRotation = headRotation.clone();
-        state.playerHeadRotation = safeHeadRotation(playerRef);
-        state.lastInputIndex = 0;
-        state.lastDebugAtMs = System.currentTimeMillis();
         tripodActive.put(playerId, state);
 
         LOGGER.info("Tripod enable for " + playerId
                 + " pos=(" + transform.getPosition().x + "," + transform.getPosition().y + "," + transform.getPosition().z + ")"
-                + " yaw=" + headRotation.getYaw()
-                + " pitch=" + headRotation.getPitch()
-                + " roll=" + headRotation.getRoll());
-        playerRef.getPacketHandler().writeNoCache(new SetServerCamera(ClientCameraView.Custom, false, null));
+                + " yaw=" + headRotation.yaw()
+                + " pitch=" + headRotation.pitch()
+                + " roll=" + headRotation.roll());
+        // Plant a static camera at the player's current viewpoint. Tripod does not borrow or
+        // create any freecam state, so the body remains under normal server control.
+        playerRef.getPacketHandler().writeNoCache(
+                new SetServerCamera(ClientCameraView.Custom, false, buildTripodSettings(transform, headRotation))
+        );
     }
 
     private void disableTripod(UUID playerId, PlayerRef playerRef) {
@@ -323,6 +302,8 @@ public class FreecamService {
         if (state == null) {
             return;
         }
+        // Clear the planted static camera and return directly to the normal player camera.
+        playerRef.getPacketHandler().writeNoCache(new SetServerCamera(ClientCameraView.Custom, false, null));
     }
 
     private static GameMode readGameMode(Store<EntityStore> store, Ref<EntityStore> entityRef) {
@@ -338,6 +319,146 @@ public class FreecamService {
             return;
         }
         Player.setGameMode(entityRef, mode, store);
+    }
+
+    private static void setFlying(Store<EntityStore> store, Ref<EntityStore> entityRef, boolean flying) {
+        if (store == null || entityRef == null) {
+            return;
+        }
+        MovementStatesComponent component = store.getComponent(entityRef, MovementStatesComponent.getComponentType());
+        if (component == null) {
+            return;
+        }
+        MovementStates states = component.getMovementStates();
+        if (states == null) {
+            states = new MovementStates();
+        }
+        states.flying = flying;
+        if (flying) {
+            states.onGround = false;
+            states.falling = false;
+            states.fallingFar = false;
+            states.jumping = false;
+        }
+        component.setMovementStates(states);
+    }
+
+    private static void forceFlyingInput(PlayerInput input) {
+        if (input == null) {
+            return;
+        }
+        List<PlayerInput.InputUpdate> updates = input.getMovementUpdateQueue();
+        if (updates == null) {
+            return;
+        }
+        for (PlayerInput.InputUpdate update : updates) {
+            if (update instanceof PlayerInput.SetMovementStates movementUpdate) {
+                MovementStates states = movementUpdate.movementStates();
+                if (states != null) {
+                    states.flying = true;
+                    states.jumping = false;
+                    states.falling = false;
+                    states.fallingFar = false;
+                }
+            }
+        }
+    }
+
+    private static void captureMotion(Store<EntityStore> store,
+                                      Ref<EntityStore> entityRef,
+                                      FreecamState state) {
+        if (store == null || entityRef == null) {
+            return;
+        }
+        Velocity velocity = store.getComponent(entityRef, Velocity.getComponentType());
+        if (velocity != null) {
+            state.velocity = new Vector3d(velocity.getVelocity());
+            state.clientVelocity = new Vector3d(velocity.getClientVelocity());
+        }
+        MovementStatesComponent movement = store.getComponent(
+                entityRef, MovementStatesComponent.getComponentType()
+        );
+        if (movement != null && movement.getMovementStates() != null) {
+            state.movementStates = movement.getMovementStates().clone();
+        }
+        Player player = store.getComponent(entityRef, Player.getComponentType());
+        if (player != null) {
+            state.fallDistance = player.getCurrentFallDistance();
+        }
+    }
+
+    private static void restoreMotion(Store<EntityStore> store,
+                                      Ref<EntityStore> entityRef,
+                                      FreecamState state) {
+        if (store == null || entityRef == null) {
+            return;
+        }
+        Velocity velocity = store.getComponent(entityRef, Velocity.getComponentType());
+        if (velocity != null && state.velocity != null) {
+            velocity.set(state.velocity);
+            velocity.setClient(state.clientVelocity != null ? state.clientVelocity : state.velocity);
+        }
+        MovementStatesComponent movement = store.getComponent(
+                entityRef, MovementStatesComponent.getComponentType()
+        );
+        if (movement != null && state.movementStates != null) {
+            movement.setMovementStates(state.movementStates.clone());
+        }
+        Player player = store.getComponent(entityRef, Player.getComponentType());
+        if (player != null) {
+            player.setCurrentFallDistance(state.fallDistance);
+        }
+    }
+
+    private static ItemContainer[] snapshotInventory(Store<EntityStore> store, Ref<EntityStore> entityRef) {
+        Player player = store != null && entityRef != null
+                ? store.getComponent(entityRef, Player.getComponentType())
+                : null;
+        Inventory inventory = player != null ? player.getInventory() : null;
+        if (inventory == null) {
+            return null;
+        }
+        return new ItemContainer[] {
+                inventory.getStorage().clone(),
+                inventory.getArmor().clone(),
+                inventory.getHotbar().clone(),
+                inventory.getUtility().clone(),
+                inventory.getTools().clone(),
+                inventory.getBackpack().clone()
+        };
+    }
+
+    private static void restoreInventory(Store<EntityStore> store,
+                                         Ref<EntityStore> entityRef,
+                                         ItemContainer[] snapshot) {
+        if (snapshot == null || snapshot.length != 6 || store == null || entityRef == null) {
+            return;
+        }
+        Player player = store.getComponent(entityRef, Player.getComponentType());
+        Inventory inventory = player != null ? player.getInventory() : null;
+        if (inventory == null) {
+            return;
+        }
+        ItemContainer[] current = {
+                inventory.getStorage(),
+                inventory.getArmor(),
+                inventory.getHotbar(),
+                inventory.getUtility(),
+                inventory.getTools(),
+                inventory.getBackpack()
+        };
+        for (int section = 0; section < current.length; section++) {
+            ItemContainer target = current[section];
+            ItemContainer original = snapshot[section];
+            short capacity = (short) Math.min(target.getCapacity(), original.getCapacity());
+            for (short slot = 0; slot < capacity; slot++) {
+                ItemStack expected = original.getItemStack(slot);
+                ItemStack actual = target.getItemStack(slot);
+                if (!java.util.Objects.equals(expected, actual)) {
+                    target.setItemStackForSlot(slot, expected != null ? expected : ItemStack.EMPTY);
+                }
+            }
+        }
     }
 
     private static Boolean readExecuteBlockDamage(Store<EntityStore> store, Ref<EntityStore> entityRef) {
@@ -357,7 +478,7 @@ public class FreecamService {
     }
 
     private static ServerCameraSettings buildFreecamSettings(Transform transform,
-                                                             com.hypixel.hytale.math.vector.Vector3f headRotation,
+                                                             Rotation3f headRotation,
                                                              int speed,
                                                              boolean lockLook) {
         ServerCameraSettings settings = new ServerCameraSettings();
@@ -383,24 +504,24 @@ public class FreecamService {
         settings.rotationType = RotationType.Custom;
         settings.position = buildEyePosition(transform);
         settings.rotation = new Direction(
-                headRotation.getYaw(),
-                headRotation.getPitch(),
-                headRotation.getRoll()
+                headRotation.yaw(),
+                headRotation.pitch(),
+                headRotation.roll()
         );
         settings.canMoveType = CanMoveType.Always;
         settings.applyMovementType = ApplyMovementType.Position;
         float horizontal = Math.max(1.0f, speed);
         float vertical = Math.max(0.5f, 0.4f + (speed * 0.12f));
-        settings.movementMultiplier = new com.hypixel.hytale.protocol.Vector3f(horizontal, vertical, horizontal);
+        settings.movementMultiplier = new Vector3f(horizontal, vertical, horizontal);
         settings.applyLookType = ApplyLookType.Rotation;
         settings.lookMultiplier = new Vector2f(lockLook ? 0.0f : 1.0f, lockLook ? 0.0f : 1.0f);
         settings.mouseInputType = MouseInputType.LookAtPlane;
-        settings.planeNormal = new com.hypixel.hytale.protocol.Vector3f(0.0f, 1.0f, 0.0f);
+        settings.planeNormal = new Vector3f(0.0f, 1.0f, 0.0f);
         return settings;
     }
 
     private static ServerCameraSettings buildTripodSettings(Transform transform,
-                                                           com.hypixel.hytale.math.vector.Vector3f headRotation) {
+                                                           Rotation3f headRotation) {
         ServerCameraSettings settings = new ServerCameraSettings();
         settings.positionLerpSpeed = 1.0f;
         settings.rotationLerpSpeed = 1.0f;
@@ -409,7 +530,7 @@ public class FreecamService {
         settings.displayCursor = false;
         settings.displayReticle = false;
         settings.mouseInputTargetType = MouseInputTargetType.Any;
-        settings.sendMouseMotion = true;
+        settings.sendMouseMotion = false;
         settings.skipCharacterPhysics = false;
         settings.isFirstPerson = false;
         settings.movementForceRotationType = com.hypixel.hytale.protocol.MovementForceRotationType.CameraRotation;
@@ -424,17 +545,19 @@ public class FreecamService {
         settings.rotationType = RotationType.Custom;
         settings.position = buildEyePosition(transform);
         settings.rotation = new Direction(
-                headRotation.getYaw(),
-                headRotation.getPitch(),
-                headRotation.getRoll()
+                headRotation.yaw(),
+                headRotation.pitch(),
+                headRotation.roll()
         );
+        // The camera remains frozen because its position and rotation are Custom. Route input
+        // through the normal character controller and player look orientation so tripod affects
+        // only the viewpoint, not gameplay movement.
         settings.canMoveType = CanMoveType.Always;
         settings.applyMovementType = ApplyMovementType.CharacterController;
-        settings.movementMultiplier = new com.hypixel.hytale.protocol.Vector3f(1.0f, 1.0f, 1.0f);
+        settings.movementMultiplier = new Vector3f(1.0f, 1.0f, 1.0f);
         settings.applyLookType = ApplyLookType.LocalPlayerLookOrientation;
         settings.lookMultiplier = new Vector2f(1.0f, 1.0f);
         settings.mouseInputType = MouseInputType.LookAtTarget;
-        settings.planeNormal = new com.hypixel.hytale.protocol.Vector3f(0.0f, 1.0f, 0.0f);
         return settings;
     }
 
@@ -460,22 +583,6 @@ public class FreecamService {
         return speed;
     }
 
-    private static boolean isClose(Transform a, Transform b) {
-        if (a == null || b == null) {
-            return false;
-        }
-        Vector3d posA = a.getPosition();
-        Vector3d posB = b.getPosition();
-        if (posA == null || posB == null) {
-            return false;
-        }
-        double dx = posA.x - posB.x;
-        double dy = posA.y - posB.y;
-        double dz = posA.z - posB.z;
-        return (dx * dx + dy * dy + dz * dz) <= (TRIPOD_STICK_DISTANCE * TRIPOD_STICK_DISTANCE);
-    }
-
-
     private static void dismountIfMounted(Store<EntityStore> store, Ref<EntityStore> entityRef) {
         if (store == null || entityRef == null) {
             return;
@@ -500,7 +607,14 @@ public class FreecamService {
 
     private static final class FreecamState {
         private Transform transform;
-        private Vector3f headRotation;
+        private Rotation3f headRotation;
+        private Transform bodyTransform;
+        private Rotation3f bodyHeadRotation;
+        private ItemContainer[] inventorySnapshot;
+        private Vector3d velocity;
+        private Vector3d clientVelocity;
+        private MovementStates movementStates;
+        private double fallDistance;
         private GameMode previousGameMode;
         private Boolean executeBlockDamage;
         private int lastInputIndex;
@@ -510,56 +624,11 @@ public class FreecamService {
 
     private static final class TripodState {
         private Transform transform;
-        private Vector3f headRotation;
-        private Vector3f playerHeadRotation;
-        private int lastInputIndex;
-        private long lastDebugAtMs;
+        private Rotation3f headRotation;
     }
-
-    private CameraSnapshot captureCameraSnapshot(PlayerRef playerRef,
-                                                 Store<EntityStore> store,
-                                                 Ref<EntityStore> entityRef) {
-        FreecamState activeState = active.get(playerRef.getUuid());
-        if (activeState != null) {
-            Transform activeTransform = activeState.transform != null ? activeState.transform.clone() : safeTransform(playerRef);
-            Vector3f activeHeadRotation = activeState.headRotation != null ? activeState.headRotation.clone() : safeHeadRotation(playerRef);
-            return new CameraSnapshot(activeTransform, activeHeadRotation);
-        }
-        Transform cameraTransform = safeTransform(playerRef);
-        Vector3f cameraHeadRotation = safeHeadRotation(playerRef);
-        if (store == null || entityRef == null) {
-            return new CameraSnapshot(cameraTransform, cameraHeadRotation);
-        }
-        PlayerInput input = store.getComponent(entityRef, PlayerInput.getComponentType());
-        if (input == null) {
-            return new CameraSnapshot(cameraTransform, cameraHeadRotation);
-        }
-        var updates = input.getMovementUpdateQueue();
-        if (updates == null) {
-            return new CameraSnapshot(cameraTransform, cameraHeadRotation);
-        }
-        for (int i = updates.size() - 1; i >= 0; i--) {
-            PlayerInput.InputUpdate update = updates.get(i);
-            if (update instanceof PlayerInput.AbsoluteMovement absolute) {
-                cameraTransform = new Transform(absolute.getX(), absolute.getY(), absolute.getZ());
-                break;
-            }
-        }
-        for (int i = updates.size() - 1; i >= 0; i--) {
-            PlayerInput.InputUpdate update = updates.get(i);
-            if (update instanceof PlayerInput.SetHead headUpdate) {
-                com.hypixel.hytale.protocol.Direction direction = headUpdate.direction();
-                cameraHeadRotation = new Vector3f(direction.pitch, direction.yaw, direction.roll);
-                break;
-            }
-        }
-        return new CameraSnapshot(cameraTransform, cameraHeadRotation);
-    }
-
-    private record CameraSnapshot(Transform transform, Vector3f headRotation) {}
 
     private record InputSnapshot(Transform transform,
-                                 Vector3f headRotation,
+                                 Rotation3f headRotation,
                                  boolean changed,
                                  int nextIndex,
                                  boolean hasMovement,
@@ -570,7 +639,7 @@ public class FreecamService {
                                  double wishZ) {}
 
     private static InputSnapshot readInputSnapshot(Transform baseTransform,
-                                                   Vector3f baseHeadRotation,
+                                                   Rotation3f baseHeadRotation,
                                                    PlayerInput input,
                                                    int lastIndex) {
         if (input == null) {
@@ -583,7 +652,7 @@ public class FreecamService {
         int size = updates.size();
         int startIndex = Math.max(0, Math.min(lastIndex, size));
         Transform transform = baseTransform != null ? baseTransform.clone() : new Transform(0.0f, 0.0f, 0.0f);
-        Vector3f headRotation = baseHeadRotation != null ? baseHeadRotation.clone() : new Vector3f(0.0f, 0.0f, 0.0f);
+        Rotation3f headRotation = baseHeadRotation != null ? baseHeadRotation.clone() : new Rotation3f(0.0f, 0.0f, 0.0f);
         boolean changed = false;
         boolean hasMovement = false;
         boolean hasWishMovement = false;
@@ -619,7 +688,7 @@ public class FreecamService {
             }
             if (update instanceof PlayerInput.SetHead headUpdate) {
                 com.hypixel.hytale.protocol.Direction direction = headUpdate.direction();
-                headRotation = new Vector3f(direction.pitch, direction.yaw, direction.roll);
+                headRotation = new Rotation3f(direction.pitch, direction.yaw, direction.roll);
                 setHeadUpdates++;
                 changed = true;
             }
@@ -635,10 +704,10 @@ public class FreecamService {
         return transform.clone();
     }
 
-    private static Vector3f safeHeadRotation(PlayerRef playerRef) {
-        Vector3f headRotation = playerRef.getHeadRotation();
+    private static Rotation3f safeHeadRotation(PlayerRef playerRef) {
+        Rotation3f headRotation = playerRef.getHeadRotation();
         if (headRotation == null) {
-            return new Vector3f(0.0f, 0.0f, 0.0f);
+            return new Rotation3f(0.0f, 0.0f, 0.0f);
         }
         return headRotation.clone();
     }

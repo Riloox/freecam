@@ -14,8 +14,11 @@ import javax.annotation.Nonnull;
 
 public class TripodCommand extends AbstractPlayerCommand {
 
+    private final FreecamService freecamService;
+
     public TripodCommand(String name, String description, FreecamService freecamService) {
         super(name, description);
+        this.freecamService = freecamService;
         addAliases("trip", "t");
     }
 
@@ -25,7 +28,17 @@ public class TripodCommand extends AbstractPlayerCommand {
                            @Nonnull Ref<EntityStore> entityRef,
                            @Nonnull PlayerRef playerRef,
                            @Nonnull World world) {
-        context.sendMessage(Message.raw("Tripod is temporarily disabled while we fix stability issues."));
+        if (freecamService.isTripodActive(playerRef.getUuid())) {
+            freecamService.toggleTripod(playerRef, world, store, entityRef);
+            context.sendMessage(Message.raw("Tripod disabled."));
+            return;
+        }
+        freecamService.toggleTripod(playerRef, world, store, entityRef);
+        context.sendMessage(Message.raw(
+                "Tripod enabled - camera planted at your current view. "
+                        + "Hytale keeps character aim and interactions bound to this fixed camera, "
+                        + "so mouse look cannot independently aim your character."
+        ));
     }
 
     @Override

@@ -57,6 +57,6 @@ public class FreecamCameraTickSystem extends EntityTickingSystem<EntityStore> {
             freecamService.tickTripod(playerRef, world, input);
             return;
         }
-        freecamService.tick(playerRef, world, input, delta);
+        freecamService.tick(playerRef, world, store, input, delta);
     }
 }

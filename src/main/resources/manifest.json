@@ -1,8 +1,8 @@
 {
   "Group": "dev.riloox",
   "Name": "Freecam",
-  "Version": "1.0.2",
-  "Description": "Adds a toggleable freecam with adjustable speed that preserves player state and blocks interaction.",
+  "Version": "1.1.0",
+  "Description": "Adds a toggleable freecam and planted tripod camera with adjustable speed that preserves player state and blocks interaction.",
   "Authors": [
     {
       "Name": "Riloox",
